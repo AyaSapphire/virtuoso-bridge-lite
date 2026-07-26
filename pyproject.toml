@@ -19,8 +19,11 @@ dependencies = [
 # Microsoft Visio via COM, Windows-only.  The pure model layer in
 # `virtuoso/visio.py` has no extra deps and stays importable everywhere.
 visio = ["pywin32; sys_platform == 'win32'"]
+# Password-authenticated SSH for legacy servers that cannot use modern keys.
+# OpenSSH/key mode remains dependency-free and is still the default.
+paramiko = ["paramiko>=3.4,<4"]
 # Test runner.  Install with `pip install -e .[dev]` then `pytest`.
-dev = ["pytest>=7.0"]
+dev = ["pytest>=7.0", "paramiko>=3.4,<4"]
 
 [project.scripts]
 virtuoso-bridge = "virtuoso_bridge.cli:main"

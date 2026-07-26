@@ -15,6 +15,7 @@ from virtuoso_bridge.transport.ssh import (
 
 __all__ = [
     "SSHRunner",
+    "ParamikoPasswordTransport",
     "RemoteTaskResult",
     "RemoteSshEnv",
     "run_remote_task",
@@ -23,3 +24,13 @@ __all__ = [
     "remote_scratch_root",
     "resolve_remote_username",
 ]
+
+
+def __getattr__(name: str):
+    if name == "ParamikoPasswordTransport":
+        from virtuoso_bridge.transport.paramiko_password import (
+            ParamikoPasswordTransport,
+        )
+
+        return ParamikoPasswordTransport
+    raise AttributeError(name)

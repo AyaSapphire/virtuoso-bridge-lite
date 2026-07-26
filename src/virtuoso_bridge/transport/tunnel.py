@@ -154,6 +154,10 @@ class SSHClient:
         timeout: int = 30,
         keep_remote_files: bool = False,
         profile: str | None = None,
+        ssh_transport: str = "openssh",
+        remote_password: str | None = None,
+        ssh_port: int = 22,
+        ssh_host_key_sha256: str | None = None,
     ) -> None:
         self._remote_host = remote_host
         self._remote_user = remote_user
@@ -164,10 +168,11 @@ class SSHClient:
         self._timeout = timeout
         self._keep_remote_files = keep_remote_files
         self._profile = profile
+        self._ssh_transport_name = ssh_transport.strip().lower() or "openssh"
 
         if _is_localhost(remote_host):
             self._ssh_runner = None
-        else:
+        elif self._ssh_transport_name == "openssh":
             self._ssh_runner = SSHRunner(
                 host=remote_host,
                 user=remote_user,
@@ -175,6 +180,37 @@ class SSHClient:
                 jump_user=jump_user,
                 persistent_shell=True,
                 verbose=True,
+            )
+        elif self._ssh_transport_name == "paramiko":
+            if jump_host:
+                raise ValueError(
+                    "Paramiko password transport does not currently support "
+                    "VB_JUMP_HOST; use the default OpenSSH transport for jump hosts"
+                )
+            if not remote_password:
+                key = _profiled_env_key("VB_REMOTE_PASSWORD", profile)
+                raise ValueError(
+                    f"{key} must be set when VB_SSH_TRANSPORT=paramiko"
+                )
+            from virtuoso_bridge.transport.paramiko_password import (
+                ParamikoPasswordTransport,
+            )
+
+            self._ssh_runner = ParamikoPasswordTransport(
+                host=remote_host,
+                user=remote_user,
+                password=remote_password,
+                ssh_port=ssh_port,
+                host_key_sha256_fingerprint=ssh_host_key_sha256,
+                timeout=timeout,
+                connect_timeout=timeout,
+                verbose=True,
+                profile=profile,
+            )
+        else:
+            raise ValueError(
+                "VB_SSH_TRANSPORT must be 'openssh' or 'paramiko', got "
+                f"{ssh_transport!r}"
             )
 
         self._remote_setup_done = False
@@ -205,6 +241,35 @@ class SSHClient:
         jump_host = os.getenv(f"VB_JUMP_HOST{suffix}", "").strip() or None
         jump_user = os.getenv(f"VB_JUMP_USER{suffix}", "").strip() or None
 
+        # OpenSSH/key mode remains the default.  Transport policy may be
+        # shared globally, while credentials and host fingerprints stay
+        # profile-specific to avoid crossing secrets between remote hosts.
+        transport_key = f"VB_SSH_TRANSPORT{suffix}"
+        transport_name = os.getenv(transport_key, "").strip()
+        if not transport_name and profile:
+            transport_name = os.getenv("VB_SSH_TRANSPORT", "").strip()
+        transport_name = transport_name.lower() or "openssh"
+
+        remote_password = (
+            os.getenv(f"VB_REMOTE_PASSWORD{suffix}", "") or ""
+        )
+        ssh_host_key_sha256 = (
+            os.getenv(f"VB_SSH_HOST_KEY_SHA256{suffix}", "").strip() or None
+        )
+        ssh_port_text = os.getenv(f"VB_SSH_PORT{suffix}", "").strip()
+        if not ssh_port_text and profile:
+            ssh_port_text = os.getenv("VB_SSH_PORT", "").strip()
+        try:
+            ssh_port = int(ssh_port_text or "22")
+        except ValueError as exc:
+            raise ValueError(
+                f"VB_SSH_PORT{suffix} must be an integer"
+            ) from exc
+        if not 1 <= ssh_port <= 65535:
+            raise ValueError(
+                f"VB_SSH_PORT{suffix} must be between 1 and 65535"
+            )
+
         # Port
         from virtuoso_bridge.virtuoso.basic.bridge import _default_remote_port
         try:
@@ -230,6 +295,10 @@ class SSHClient:
             jump_user=jump_user,
             keep_remote_files=keep_remote_files,
             profile=profile,
+            ssh_transport=transport_name,
+            remote_password=remote_password,
+            ssh_port=ssh_port,
+            ssh_host_key_sha256=ssh_host_key_sha256,
         )
 
     # -- properties ---------------------------------------------------------
@@ -430,7 +499,7 @@ class SSHClient:
         runner = self._require_runner()
         if runner.is_tunnel_alive:
             return
-        if SSHRunner.can_reach_port(self._local_port):
+        if runner.can_reach_port(self._local_port):
             # Port reachable (external tunnel) — load PID from state if available
             state = self.read_state(self._profile)
             if state and state.get("tunnel_pid"):
@@ -457,7 +526,10 @@ class SSHClient:
                     _update_env_file(_profiled_env_key("VB_LOCAL_PORT", self._profile), str(local_port))
                 logger.info(
                     "SSH tunnel established (PID %d): localhost:%d -> %s:localhost:%d",
-                    proc.pid, local_port, self._remote_host, self._port,
+                    runner.tunnel_pid or proc.pid,
+                    local_port,
+                    self._remote_host,
+                    self._port,
                 )
                 return
             # Failed
@@ -554,6 +626,7 @@ class SSHClient:
             "remote_host": self._remote_host,
             "setup_path": self._remote_virtuoso_setup_path,
             "profile": self._profile,
+            "ssh_transport": self._ssh_transport_name,
             "started_at": time.time(),
         }
         _state_file(self._profile).write_text(json.dumps(state, indent=2), encoding="utf-8")

@@ -11,7 +11,9 @@ Control Cadence Virtuoso via Python — remotely over SSH or locally on the same
 
 ## Prerequisites
 
-1. **SSH**: `ssh my-server` must work without a password prompt.
+1. **SSH**: by default, `ssh my-server` must work without a password prompt.
+   Legacy password-only servers may instead use the optional Paramiko transport
+   documented below.
 2. **Virtuoso** (for SKILL execution): a running Virtuoso process on the remote (or local) machine.
 3. **Spectre** (for simulation only): `spectre` on PATH, or set `VB_CADENCE_CSHRC` to a cshrc that adds Cadence tools to PATH.
 
@@ -24,6 +26,12 @@ Control Cadence Virtuoso via Python — remotely over SSH or locally on the same
 ```bash
 uv venv .venv && source .venv/bin/activate   # Windows: source .venv/Scripts/activate
 uv pip install -e .
+```
+
+For the optional password-authenticated Paramiko transport:
+
+```bash
+uv pip install -e ".[paramiko]"
 ```
 
 ## Step-by-step setup (remote mode)
@@ -56,6 +64,22 @@ VB_LOCAL_PORT=65082                   # local port forwarded via SSH tunnel
 # Optional — only needed if `spectre` is not already on PATH in the remote shell.
 # VB_CADENCE_CSHRC=/path/to/.cshrc   # cshrc that sets up Cadence tools on the remote
 ```
+
+For a legacy server where public-key authentication is unavailable, use:
+
+```dotenv
+VB_SSH_TRANSPORT=paramiko
+VB_REMOTE_PASSWORD=your_password
+VB_SSH_PORT=22
+VB_SSH_HOST_KEY_SHA256=SHA256:verified_server_fingerprint
+```
+
+`VB_REMOTE_PASSWORD` is read only by the Paramiko transport and is never added
+to an SSH command line or log. Keep this `.env` untracked and restrict its file
+permissions. Paramiko mode currently supports direct SSH connections only; jump
+hosts still require the default OpenSSH transport. The optional dependency is
+constrained to the verified Paramiko 3.x line so legacy `ssh-rsa` host keys
+remain available.
 
 **3. Start the bridge**
 
@@ -157,8 +181,11 @@ Your machine  ──SSH──►  Jump host (bastion)  ──SSH──►  Compu
    - If not: install in the project venv (`uv pip install -e .`) then ask the user for their SSH target. If they give `user@host` (plus optional jump), run `virtuoso-bridge init user@host [-J user@jump]` — it fills everything in one shot. Otherwise run `virtuoso-bridge init` for an empty template and ask them to fill `VB_REMOTE_HOST`.
    - Verify: `VB_REMOTE_HOST` = compute host (where Virtuoso runs), `VB_JUMP_HOST` = bastion (if any).
 
-2. **Check SSH** — `ssh <VB_REMOTE_HOST> echo ok` (or via jump host if configured)
-   - If this fails: tell the user to fix SSH first. The bridge assumes `ssh <host>` already works.
+2. **Check SSH**
+   - Default OpenSSH mode: `ssh <VB_REMOTE_HOST> echo ok` (or via jump host).
+   - Paramiko mode: set `VB_SSH_TRANSPORT=paramiko`, configure the password and
+     host-key fingerprint, then run `virtuoso-bridge start`.
+   - If the selected mode fails, fix SSH authentication before continuing.
 
 3. **Check Virtuoso** — `ssh <VB_REMOTE_HOST> "pgrep -f virtuoso"`
    - If no process: tell the user to start Virtuoso first.

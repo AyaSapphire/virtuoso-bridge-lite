@@ -92,6 +92,27 @@ virtuoso-bridge status         # tunnel + Virtuoso daemon + Spectre availability
 On Windows PowerShell, replace the activation line with
 `.\.venv\Scripts\Activate.ps1`.
 
+The default transport uses system OpenSSH and expects key authentication with
+no password prompt. For a legacy password-only server, install the optional
+transport and add the following to the selected `.env`:
+
+```bash
+uv pip install -e ".[paramiko]"
+```
+
+```dotenv
+VB_SSH_TRANSPORT=paramiko
+VB_REMOTE_PASSWORD=your_password
+VB_SSH_PORT=22
+VB_SSH_HOST_KEY_SHA256=SHA256:verified_server_fingerprint
+```
+
+The password is passed directly to Paramiko, never placed in an SSH command
+line. Paramiko mode currently supports direct hosts; jump-host configurations
+continue to use the default OpenSSH transport. The optional dependency is
+currently constrained to the verified Paramiko 3.x line; Paramiko 5.0 fails to
+negotiate the legacy `ssh-rsa` host keys used by some OpenSSH 5.x EDA servers.
+
 ```python
 from virtuoso_bridge import VirtuosoClient
 client = VirtuosoClient.from_env()

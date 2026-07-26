@@ -167,10 +167,26 @@ def cli_init(
 
 # -- start ------------------------------------------------------------------
 
-def _format_ssh_failure(ssh_env) -> None:
+def _format_ssh_failure(ssh_env, profile: str | None = None) -> None:
     """Print a user-friendly hint after ``warm`` fails for SSH-shaped reasons."""
     print(f"SSH to {ssh_env.remote_host} failed.")
     print(f"  Check VB_REMOTE_HOST and VB_REMOTE_USER in your .env file.")
+    suffix = f"_{profile}" if profile else ""
+    transport = (
+        os.getenv(f"VB_SSH_TRANSPORT{suffix}", "").strip()
+        or os.getenv("VB_SSH_TRANSPORT", "").strip()
+        or "openssh"
+    ).lower()
+    if transport == "paramiko":
+        print(
+            f"  Check VB_REMOTE_PASSWORD{suffix}, VB_SSH_PORT{suffix}, and "
+            f"VB_SSH_HOST_KEY_SHA256{suffix}."
+        )
+        print(
+            '  Verify the optional dependency is installed with '
+            '`uv pip install -e ".[paramiko]"`.'
+        )
+        return
     if ssh_env.jump_host:
         jump_user = ssh_env.jump_user or ssh_env.remote_user
         print(
@@ -219,7 +235,7 @@ def _start_one_profile(profile: str | None) -> int:
             ssh.warm()
         except Exception as exc:
             if not is_local:
-                _format_ssh_failure(remote_ssh_env_from_os(profile))
+                _format_ssh_failure(remote_ssh_env_from_os(profile), profile)
                 msg = str(exc).strip()
                 if msg:
                     print(f"  Details: {msg.splitlines()[0]}")
